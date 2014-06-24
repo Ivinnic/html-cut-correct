@@ -1,0 +1,169 @@
+<?php
+
+
+/**
+ * cutHtmlString
+ * cut and correct html content
+ * author Anton Vinnic <ivinnic@gmail.com>
+ * @name cutHtmlString
+ * @version 1.1
+ *
+ * @date 2014-06-24
+ */
+
+
+
+/**
+ * Returns correct clipped HTML
+ *	
+ * @param	$par['max_length']=1000; 
+ *			$par['word_boundary']=true; //cut whole words only
+ *			$par['ellipsis']=true; //add the dots
+ *			$par['html']=true; //string can contain html
+ * 
+ * @param	$content - content
+ * @return	string
+ */
+
+function cutHtmlString($alter, $content) {
+
+	if (mb_strlen($content) > $alter['max_length']) {
+		$content = mb_substr($content, 0, $alter['max_length']);
+		// TODO: replace this with cleanstring of ctools
+		if (!empty($alter['word_boundary'])) {
+			$regex = "(.*)\b.+";
+			if (function_exists('mb_ereg')) {
+				$found = mb_ereg($regex, $content, $matches);
+			}
+			else {
+				$found = preg_match("/$regex/us", $content, $matches);
+			}
+			if ($found) {
+				$content = $matches[1];
+			}
+		}
+		// Remove scraps of HTML entities from the end of a strings
+		$content = rtrim(preg_replace('/(?:<(?!.+>)|&(?!.+;)).*$/us', '', $content));
+
+		if (!empty($alter['ellipsis'])) {
+			$content .= '...';
+		}
+	}
+	if (!empty($alter['html'])) {
+		$content = _filter_htmlcorrector($content);
+	}
+
+	return $content;
+}
+
+
+
+/**
+ * Parses an HTML snippet and returns it as a DOM object.
+ *
+ * This function loads the body part of a partial (X)HTML document
+ * and returns a full DOMDocument object that represents this document.
+ * You can use filter_dom_serialize() to serialize this DOMDocument
+ * back to a XHTML snippet.
+ *
+ * @param $text
+ *   The partial (X)HTML snippet to load. Invalid mark-up
+ *   will be corrected on import.
+ * @return
+ *   A DOMDocument that represents the loaded (X)HTML snippet.
+ */
+function filter_dom_load($text) {
+	$dom_document = new DOMDocument();
+	// Ignore warnings during HTML soup loading.
+	@$dom_document->loadHTML('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8" /></head><body>' . $text . '</body></html>');
+
+	return $dom_document;
+}
+
+/**
+ * Converts a DOM object back to an HTML snippet.
+ *
+ * The function serializes the body part of a DOMDocument
+ * back to an XHTML snippet.
+ *
+ * The resulting XHTML snippet will be properly formatted
+ * to be compatible with HTML user agents.
+ *
+ * @param $dom_document
+ *   A DOMDocument object to serialize, only the tags below
+ *   the first <body> node will be converted.
+ * @return
+ *   A valid (X)HTML snippet, as a string.
+ */
+function filter_dom_serialize($dom_document) {
+	$body_node = $dom_document->getElementsByTagName('body')->item(0);
+	$body_content = '';
+
+	foreach ($body_node->getElementsByTagName('script') as $node) {
+		filter_dom_serialize_escape_cdata_element($dom_document, $node);
+	}
+
+	foreach ($body_node->getElementsByTagName('style') as $node) {
+		filter_dom_serialize_escape_cdata_element($dom_document, $node, '/*', '*/');
+	}
+
+	foreach ($body_node->childNodes as $child_node) {
+		$body_content .= $dom_document->saveXML($child_node);
+	}
+	return preg_replace('|<([^> ]*)/>|i', '<$1 />', $body_content);
+}
+
+/**
+ * Adds comments around the <!CDATA section in a dom element.
+ *
+ * DOMDocument::loadHTML in filter_dom_load() makes CDATA sections from the
+ * contents of inline script and style tags.  This can cause HTML 4 browsers to
+ * throw exceptions.
+ *
+ * This function attempts to solve the problem by creating a DocumentFragment
+ * and imitating the behavior in drupal_get_js(), commenting the CDATA tag.
+ *
+ * @param $dom_document
+ *   The DOMDocument containing the $dom_element.
+ * @param $dom_element
+ *   The element potentially containing a CDATA node.
+ * @param $comment_start
+ *   String to use as a comment start marker to escape the CDATA declaration.
+ * @param $comment_end
+ *   String to use as a comment end marker to escape the CDATA declaration.
+ */
+function filter_dom_serialize_escape_cdata_element($dom_document, $dom_element, $comment_start = '//', $comment_end = '') {
+	foreach ($dom_element->childNodes as $node) {
+		if (get_class($node) == 'DOMCdataSection') {
+			// See drupal_get_js().  This code is more or less duplicated there.
+			$embed_prefix = "\n<!--{$comment_start}--><![CDATA[{$comment_start} ><!--{$comment_end}\n";
+			$embed_suffix = "\n{$comment_start}--><!]]>{$comment_end}\n";
+			$fragment = $dom_document->createDocumentFragment();
+			$fragment->appendXML($embed_prefix . $node->data . $embed_suffix);
+			$dom_element->appendChild($fragment);
+			$dom_element->removeChild($node);
+		}
+	}
+}
+
+/**
+ * Returns HTML for a link to the more extensive filter tips.
+ *
+ * @ingroup themeable
+ */
+function theme_filter_tips_more_info() {
+	return '<p>' . l(t('More information about text formats'), 'filter/tips') . '</p>';
+}
+
+function _filter_htmlcorrector($text) {
+	return filter_dom_serialize(filter_dom_load($text));
+}
+
+function html_corrector($html)
+{
+	return _filter_htmlcorrector($html);
+}
+
+
+
+
